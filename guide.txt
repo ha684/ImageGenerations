@@ -1,0 +1,22 @@
+docker run -v D:/Workspace/python_code/TextRecognitionDataGenerator/trdg/images_out:/app/out/ `
+           -v D:/Workspace/python_code/TextRecognitionDataGenerator/trdg/fonts/vi:/app/fonts/vi/ `
+           -v D:/Workspace/python_code/TextRecognitionDataGenerator/trdg/images:/app/images/ `
+           -v D:/Workspace/python_code/TextRecognitionDataGenerator/trdg/texts:/app/texts/ `
+           -t belval/trdg:latest trdg -c 122000000 -b 3 -d 3`
+           --word_split `
+           --blur 3 `
+	   --random_blur `
+           --input_file /app/texts/data.txt `
+           --output_dir /app/out/ `
+           --font_dir /app/fonts/vi/ `
+           --image_dir /app/images/ `
+           --thread_count 6 `
+           --character_spacing 1 `
+           --name_format 2 `
+           --extension png `
+           --skew_angle 10 `
+           --random_skew 
+
+1855566
+
+mklink /J "C:\Program Files (x86)\Microsoft SQL Server Management Studio 19" "D:\Program Files (x86)\Microsoft SQL Server Management Studio 19"
