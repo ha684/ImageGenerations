@@ -136,16 +136,18 @@ def check_total_ram_usage(threshold):
     total_memory = psutil.virtual_memory().used / (1024 ** 2)
     return total_memory > threshold
 import os
-import random as rnd
 import logging
-from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
+from multiprocessing import Event
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 from tqdm import tqdm
-import multiprocessing
+from PIL import Image
+import random as rnd
 
-# Assuming FakeTextDataGenerator is imported from somewhere
 
-def stream_input_file(input_file, start_idx=0, batch_size=100):
+def stream_input_file(input_file, start_idx=0, batch_size=10000):
+    """Generator to stream input file in batches."""
     with open(input_file, 'r', encoding='utf-8') as file:
         batch = []
         for idx, line in enumerate(file):
@@ -161,17 +163,19 @@ def stream_input_file(input_file, start_idx=0, batch_size=100):
             yield idx, batch
 
 def remove_incorrect_srgb_profile(image_path):
+    """Remove the incorrect sRGB profile from an image if present."""
     try:
         with Image.open(image_path) as img:
             if "icc_profile" in img.info:
                 img.info["icc_profile"] = None
-            img.save(image_path)
+                img.save(image_path)
     except Exception as e:
         logging.error(f"Failed to process {image_path}: {e}")
 
 def process_image(args, fonts, image_id, string):
-    image_path = f"{args.output_dir}/{image_id}.{args.extension}"
-    random_height = rnd.randint(11,48)
+    """Process a single image: generate, clean, and prepare label."""
+    image_path = os.path.join(args.output_dir, f"{image_id}.{args.extension}")
+    random_height = rnd.randint(11, 48)
     try:
         FakeTextDataGenerator.generate_from_tuple(
             (image_id, string, rnd.choice(fonts), args.output_dir, random_height,
@@ -181,72 +185,117 @@ def process_image(args, fonts, image_id, string):
              0, args.text_color, args.image_mode, 0)
         )
         remove_incorrect_srgb_profile(image_path)
-
-        with open(os.path.join(args.output_dir, "labels.txt"), "a", encoding="utf-8") as labels_file:
-            labels_file.write(f"{image_id}.{args.extension}\t{string}\n")
-
-        return image_id
+        return f"{image_id}.{args.extension}\t{string}\n"
     except Exception as e:
-        logging.error(f"Error processing line {image_id}: {e}")
+        logging.error(f"Error processing image {image_id}: {e}")
         return None
 
-def main():
-    args = parse_arguments()
-    setup_logging(args)
-    fonts = [os.path.join(args.font_dir, p) for p in os.listdir(args.font_dir) if p.endswith(".ttf")]
-
-    image_id = get_last_image_id(args.output_dir, default_id=1)
-    start_line_idx = get_last_processed_line(args.output_dir)
-
-    cpu_count = multiprocessing.cpu_count()
-    
-    with ProcessPoolExecutor(max_workers=cpu_count) as executor:
-        process_image_partial = partial(process_image, args, fonts)
-        
-        for batch_idx, batch in stream_input_file(args.input_file, start_idx=start_line_idx, batch_size=10000):
-            if terminate_flag.is_set():
-                break
-
-            futures = [executor.submit(process_image_partial, image_id + idx, string) 
-                       for idx, string in enumerate(batch)]
-
-            for future in tqdm(futures, total=len(batch), desc=f"Batch {batch_idx}"):
-                processed_image_id = future.result()
-                if processed_image_id is not None:
-                    image_id = processed_image_id + 1
-
-            save_last_processed_line(args.output_dir, batch_idx * 1000 + len(batch))
-            save_last_image_id(args.output_dir, image_id)
-
 def get_last_image_id(output_dir, default_id=0):
+    """Retrieve the last processed image ID."""
     id_file_path = os.path.join(output_dir, "last_image_id.txt")
     if os.path.exists(id_file_path):
         with open(id_file_path, "r", encoding='utf-8') as id_file:
-            return int(id_file.read().strip())
+            try:
+                return int(id_file.read().strip())
+            except ValueError:
+                return default_id
     return default_id
 
 def save_last_image_id(output_dir, last_image_id):
+    """Save the last processed image ID."""
     id_file_path = os.path.join(output_dir, "last_image_id.txt")
     with open(id_file_path, "w", encoding='utf-8') as id_file:
         id_file.write(str(last_image_id))
 
 def get_last_processed_line(output_dir):
+    """Retrieve the last processed line index."""
     line_file_path = os.path.join(output_dir, "last_processed_line.txt")
     if os.path.exists(line_file_path):
         with open(line_file_path, "r", encoding='utf-8') as line_file:
-            return int(line_file.read().strip())
+            try:
+                return int(line_file.read().strip())
+            except ValueError:
+                return 0
     return 0
 
 def save_last_processed_line(output_dir, line_idx):
+    """Save the last processed line index."""
     line_file_path = os.path.join(output_dir, "last_processed_line.txt")
     with open(line_file_path, "w", encoding='utf-8') as line_file:
         line_file.write(str(line_idx))
 
-def setup_logging(args):
-    logging.basicConfig(filename=os.path.join(args.output_dir, 'error.log'),
-                        level=logging.ERROR,
-                        format='%(asctime)s - %(levelname)s - %(message)s')
+def setup_logging(output_dir):
+    """Configure logging to capture errors."""
+    logging.basicConfig(
+        filename=os.path.join(output_dir, 'error.log'),
+        level=logging.ERROR,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+
+def write_labels(output_dir, labels):
+    """Write a batch of labels to the labels file."""
+    labels_path = os.path.join(output_dir, "labels.txt")
+    with open(labels_path, "a", encoding="utf-8") as labels_file:
+        labels_file.writelines(labels)
+
+def main():
+    args = parse_arguments()
+    setup_logging(args.output_dir)
+    
+    # Preload font paths
+    fonts = [os.path.join(args.font_dir, p) for p in os.listdir(args.font_dir) if p.endswith(".ttf")]
+    if not fonts:
+        logging.error("No .ttf fonts found in the specified font directory.")
+        return
+    
+    image_id = get_last_image_id(args.output_dir, default_id=1)
+    start_line_idx = get_last_processed_line(args.output_dir)
+    
+    cpu_count = multiprocessing.cpu_count()
+    
+    # Prepare partial function for multiprocessing
+    process_image_partial = partial(process_image, args, fonts)
+    
+    labels_buffer = []
+    buffer_size = 1000  # Adjust based on memory and performance
+    
+    with ProcessPoolExecutor(max_workers=cpu_count) as executor:
+        futures = []
+        for batch_idx, batch in stream_input_file(args.input_file, start_idx=start_line_idx, batch_size=10000):
+            if terminate_flag.is_set():
+                break
+            
+            # Submit all tasks for the current batch
+            for idx, string in enumerate(batch):
+                current_image_id = image_id + idx
+                futures.append(executor.submit(process_image_partial, current_image_id, string))
+            
+            # Use tqdm for progress visualization
+            for future in tqdm(as_completed(futures), total=len(futures), desc=f"Processing Batch {batch_idx}"):
+                result = future.result()
+                if result:
+                    labels_buffer.append(result)
+                    image_id += 1  # Increment only if processing was successful
+                
+                # Save labels in buffer to reduce I/O operations
+                if len(labels_buffer) >= buffer_size:
+                    write_labels(args.output_dir, labels_buffer)
+                    labels_buffer = []
+            
+            # Clear futures for the next batch
+            futures = []
+            
+            # Save progress
+            save_last_processed_line(args.output_dir, batch_idx * 10000 + len(batch))
+            save_last_image_id(args.output_dir, image_id)
+        
+        # Write any remaining labels
+        if labels_buffer:
+            write_labels(args.output_dir, labels_buffer)
 
 if __name__ == "__main__":
-    terminate_flag = multiprocessing.Event()
-    main()
+    terminate_flag = Event()
+    try:
+        main()
+    except KeyboardInterrupt:
+        terminate_flag.set()
