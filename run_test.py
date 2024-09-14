@@ -135,6 +135,15 @@ def signal_handler(sig, frame):
 def check_total_ram_usage(threshold):
     total_memory = psutil.virtual_memory().used / (1024 ** 2)
     return total_memory > threshold
+import os
+import random as rnd
+import logging
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
+from tqdm import tqdm
+import multiprocessing
+
+# Assuming FakeTextDataGenerator is imported from somewhere
 
 def stream_input_file(input_file, start_idx=0, batch_size=100):
     with open(input_file, 'r', encoding='utf-8') as file:
@@ -160,109 +169,84 @@ def remove_incorrect_srgb_profile(image_path):
     except Exception as e:
         logging.error(f"Failed to process {image_path}: {e}")
 
-def process_image(args, image_id, string):
-    fonts = [os.path.join(args.font_dir, p) for p in os.listdir(args.font_dir) if p.endswith(".ttf")]
+def process_image(args, fonts, image_id, string):
     image_path = f"{args.output_dir}/{image_id}.{args.extension}"
+    random_height = rnd.randint(11,48)
     try:
         FakeTextDataGenerator.generate_from_tuple(
-            (image_id, string, rnd.choice(fonts), args.output_dir, 64,
+            (image_id, string, rnd.choice(fonts), args.output_dir, random_height,
              args.extension, args.skew_angle, args.random_skew, args.blur, args.random_blur,
              args.background, 0, 0, 0, args.name_format, -1, 1, args.text_color, 0, 1.0,
-             args.character_spacing, (5, 5, 5, 5), False, 0, args.word_split, args.image_dir,
+             args.character_spacing, (0, 0, 0, 0), False, 0, args.word_split, args.image_dir,
              0, args.text_color, args.image_mode, 0)
         )
         remove_incorrect_srgb_profile(image_path)
 
-        save_last_image_id(args.output_dir, image_id)
-
-        labels_file_path = os.path.join(args.output_dir, "labels.txt")
-        with open(labels_file_path, "a", encoding="utf8") as labels_file:
+        with open(os.path.join(args.output_dir, "labels.txt"), "a", encoding="utf-8") as labels_file:
             labels_file.write(f"{image_id}.{args.extension}\t{string}\n")
 
         return image_id
-
     except Exception as e:
-        print(f"Error processing line {image_id}: {e}")
+        logging.error(f"Error processing line {image_id}: {e}")
         return None
+
+def main():
+    args = parse_arguments()
+    setup_logging(args)
+    fonts = [os.path.join(args.font_dir, p) for p in os.listdir(args.font_dir) if p.endswith(".ttf")]
+
+    image_id = get_last_image_id(args.output_dir, default_id=1)
+    start_line_idx = get_last_processed_line(args.output_dir)
+
+    cpu_count = multiprocessing.cpu_count()
+    
+    with ProcessPoolExecutor(max_workers=cpu_count) as executor:
+        process_image_partial = partial(process_image, args, fonts)
+        
+        for batch_idx, batch in stream_input_file(args.input_file, start_idx=start_line_idx, batch_size=10000):
+            if terminate_flag.is_set():
+                break
+
+            futures = [executor.submit(process_image_partial, image_id + idx, string) 
+                       for idx, string in enumerate(batch)]
+
+            for future in tqdm(futures, total=len(batch), desc=f"Batch {batch_idx}"):
+                processed_image_id = future.result()
+                if processed_image_id is not None:
+                    image_id = processed_image_id + 1
+
+            save_last_processed_line(args.output_dir, batch_idx * 1000 + len(batch))
+            save_last_image_id(args.output_dir, image_id)
 
 def get_last_image_id(output_dir, default_id=0):
     id_file_path = os.path.join(output_dir, "last_image_id.txt")
     if os.path.exists(id_file_path):
-        with open(id_file_path, "r") as id_file:
+        with open(id_file_path, "r", encoding='utf-8') as id_file:
             return int(id_file.read().strip())
     return default_id
 
 def save_last_image_id(output_dir, last_image_id):
     id_file_path = os.path.join(output_dir, "last_image_id.txt")
-    with open(id_file_path, "w") as id_file:
+    with open(id_file_path, "w", encoding='utf-8') as id_file:
         id_file.write(str(last_image_id))
 
 def get_last_processed_line(output_dir):
     line_file_path = os.path.join(output_dir, "last_processed_line.txt")
     if os.path.exists(line_file_path):
-        with open(line_file_path, "r") as line_file:
+        with open(line_file_path, "r", encoding='utf-8') as line_file:
             return int(line_file.read().strip())
     return 0
 
 def save_last_processed_line(output_dir, line_idx):
     line_file_path = os.path.join(output_dir, "last_processed_line.txt")
-    with open(line_file_path, "w") as line_file:
+    with open(line_file_path, "w", encoding='utf-8') as line_file:
         line_file.write(str(line_idx))
 
-def main():
-    args = parse_arguments()
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    try:
-        os.makedirs(args.output_dir, exist_ok=True)
-    except OSError as e:
-        if e.errno != errno.EEXIST:
-            raise
-
-    image_id = get_last_image_id(args.output_dir, default_id=1)
-    start_line_idx = get_last_processed_line(args.output_dir)
-    max_images = 1000000
-    with multiprocessing.Pool(processes=args.thread_count) as pool:
-        try:
-            for line_idx, batch in tqdm(stream_input_file(args.input_file, start_idx=start_line_idx, batch_size=100)):
-                if terminate_flag.is_set():
-                    break
-
-                if check_total_ram_usage(10000):
-                    while check_total_ram_usage(10000):
-                        time.sleep(1)
-                    if terminate_flag.is_set():
-                        break
-
-                results = [
-                    pool.apply_async(process_image, (args, image_id + idx, string))
-                    for idx, string in enumerate(batch)
-                ]
-
-                for result in results:
-                    if terminate_flag.is_set():
-                        break
-                    processed_image_id = result.get()
-                    if processed_image_id is not None:
-                        image_id = processed_image_id + 1
-                        if image_id > max_images:
-                            print(f"Reached {max_images} images. Stopping.")
-                            pool.terminate()
-                            pool.join()
-                            return
-                        
-                save_last_processed_line(args.output_dir, line_idx + 1)
-                save_last_image_id(args.output_dir, image_id)
-
-            pool.close()
-            pool.join()
-
-        except Exception as e:
-            logging.error(f"Unexpected error: {e}")
-            pool.terminate()
-            pool.join()
+def setup_logging(args):
+    logging.basicConfig(filename=os.path.join(args.output_dir, 'error.log'),
+                        level=logging.ERROR,
+                        format='%(asctime)s - %(levelname)s - %(message)s')
 
 if __name__ == "__main__":
+    terminate_flag = multiprocessing.Event()
     main()
