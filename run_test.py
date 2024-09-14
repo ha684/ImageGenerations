@@ -27,7 +27,7 @@ def parse_arguments():
     parser.add_argument("--output_dir", type=str, nargs="?", help="The output directory", default="./images_out/")
     
     # Input file
-    parser.add_argument("-i", "--input_file", type=str, nargs="?", help="When set, this argument uses a specified text file as source for the text", default="./texts/data.txt")
+    parser.add_argument("-i", "--input_file", type=str, nargs="?", help="When set, this argument uses a specified text file as source for the text", default="./texts/118.txt")
     
     # Language
     parser.add_argument("-l", "--language", type=str, nargs="?", help="The language to use", default="en")
@@ -46,45 +46,45 @@ def parse_arguments():
     parser.add_argument("-r", "--random", action="store_true", help="Define if the produced string will have variable word count.", default=False)
     
     # Image format and size
-    parser.add_argument("-f", "--format", type=int, nargs="?", help="Define the height of the produced images if horizontal, else the width", default=64)
+    parser.add_argument("-f", "--format", type=int, nargs="?", help="Define the height of the produced images if horizontal, else the width", default=10)
     
     # Number of threads to use
-    parser.add_argument("-t", "--thread_count", type=int, nargs="?", help="Define the number of threads to use for image generation", default=1)
+    parser.add_argument("-t", "--thread_count", type=int, nargs="?", help="Define the number of threads to use for image generation", default=4)
     
     # File extension
     parser.add_argument("-e", "--extension", type=str, nargs="?", help="Define the extension to save the image with", default="png")
     
     # Skew options
-    parser.add_argument("-k", "--skew_angle", type=int, nargs="?", help="Define skewing angle of the generated text.", default=10)
+    parser.add_argument("-k", "--skew_angle", type=int, nargs="?", help="Define skewing angle of the generated text.", default=8)
     parser.add_argument("-rk", "--random_skew", action="store_true", help="When set, the skew angle will be randomized.", default=True)
     
     # Blur options
-    parser.add_argument("-bl", "--blur", type=int, nargs="?", help="Apply gaussian blur to the resulting sample.", default=3)
+    parser.add_argument("-bl", "--blur", type=int, nargs="?", help="Apply gaussian blur to the resulting sample.", default=1)
     parser.add_argument("-rbl", "--random_blur", action="store_true", help="When set, the blur radius will be randomized.", default=True)
     
     # Background type
     parser.add_argument("-b", "--background", type=int, nargs="?", help="Define what kind of background to use.", default=3)
     
     # Handwriting option
-    parser.add_argument("-hw", "--handwritten", action="store_true", help='Define if the data will be "handwritten" by an RNN.', default=False)
+    parser.add_argument("-hw", "--handwritten", action="store_true", help='Define if the data will be "handwritten" by an RNN.', default=True)
     
     # File naming format
     parser.add_argument("-na", "--name_format", type=int, help="Define how the produced files will be named.", default=2)
     
     # Output options
-    parser.add_argument("-om", "--output_mask", type=int, help="Define if the generator will return masks for the text", default=0)
+    parser.add_argument("-om", "--output_mask", type=int, help="Define if the generator will return masks for the text", default=1)
     parser.add_argument("-obb", "--output_bboxes", type=int, help="Define if the generator will return bounding boxes for the text.", default=0)
     
     # Distortion options
     parser.add_argument("-d", "--distorsion", type=int, nargs="?", help="Define a distortion applied to the resulting image.", default=3)
-    parser.add_argument("-do", "--distorsion_orientation", type=int, nargs="?", help="Define the distortion's orientation.", default=0)
+    parser.add_argument("-do", "--distorsion_orientation", type=int, nargs="?", help="Define the distortion's orientation.", default=10)
     
     # Image dimensions and alignment
     parser.add_argument("-wd", "--width", type=int, nargs="?", help="Define the width of the resulting image.", default=-1)
     parser.add_argument("-al", "--alignment", type=int, nargs="?", help="Define the alignment of the text in the image.", default=1)
     
     # Orientation
-    parser.add_argument("-or", "--orientation", type=int, nargs="?", help="Define the orientation of the text.", default=0)
+    parser.add_argument("-or", "--orientation", type=int, nargs="?", help="Define the orientation of the text.", default=10)
     
     # Text color
     parser.add_argument("-tc", "--text_color", type=str, nargs="?", help="Define the text's color.", default="#282828")
@@ -163,15 +163,16 @@ def remove_incorrect_srgb_profile(image_path):
 def process_image(args, image_id, string):
     fonts = [os.path.join(args.font_dir, p) for p in os.listdir(args.font_dir) if p.endswith(".ttf")]
     image_path = f"{args.output_dir}/{image_id}.{args.extension}"
+    random_height = rnd.randint(12, 48)
     try:
         FakeTextDataGenerator.generate_from_tuple(
-            (image_id, string, rnd.choice(fonts), args.output_dir, 64,
+            (image_id, string, rnd.choice(fonts), args.output_dir, random_height,
              args.extension, args.skew_angle, args.random_skew, args.blur, args.random_blur,
              args.background, 0, 0, 0, args.name_format, -1, 1, args.text_color, 0, 1.0,
              args.character_spacing, (5, 5, 5, 5), False, 0, args.word_split, args.image_dir,
              0, args.text_color, args.image_mode, 0)
         )
-        remove_incorrect_srgb_profile(image_path)
+        # remove_incorrect_srgb_profile(image_path)
 
         save_last_image_id(args.output_dir, image_id)
 
@@ -197,12 +198,12 @@ def save_last_image_id(output_dir, last_image_id):
     with open(id_file_path, "w") as id_file:
         id_file.write(str(last_image_id))
 
-def get_last_processed_line(output_dir):
+def get_last_processed_line(output_dir,default_id=0):
     line_file_path = os.path.join(output_dir, "last_processed_line.txt")
     if os.path.exists(line_file_path):
         with open(line_file_path, "r") as line_file:
             return int(line_file.read().strip())
-    return 0
+    return default_id
 
 def save_last_processed_line(output_dir, line_idx):
     line_file_path = os.path.join(output_dir, "last_processed_line.txt")
@@ -221,17 +222,17 @@ def main():
         if e.errno != errno.EEXIST:
             raise
 
-    image_id = get_last_image_id(args.output_dir, default_id=1)
-    start_line_idx = get_last_processed_line(args.output_dir)
-    max_images = 1000000
+    image_id = get_last_image_id(args.output_dir, default_id=0)
+    start_line_idx = get_last_processed_line(args.output_dir,default_id=0)
+    max_images = 4000000
     with multiprocessing.Pool(processes=args.thread_count) as pool:
         try:
-            for line_idx, batch in tqdm(stream_input_file(args.input_file, start_idx=start_line_idx, batch_size=100)):
+            for line_idx, batch in tqdm(stream_input_file(args.input_file, start_idx=start_line_idx, batch_size=10000)):
                 if terminate_flag.is_set():
                     break
 
-                if check_total_ram_usage(10000):
-                    while check_total_ram_usage(10000):
+                if check_total_ram_usage(22000):
+                    while check_total_ram_usage(22000):
                         time.sleep(1)
                     if terminate_flag.is_set():
                         break

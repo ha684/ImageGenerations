@@ -1,6 +1,6 @@
 # Define the input and output file paths
-input_file_path = r'D:\Workspace\python_code\ImageGeneration\images_out\labels.txt'
-output_file_path = r'D:\Workspace\python_code\ImageGeneration\images_out\labels1.txt'
+input_file_path = r'D:\Workspace\python_code\ImageGenerations\images_out\labels.txt'
+output_file_path = r'D:\Workspace\python_code\ImageGenerations\images_out\labels1.txt'
 
 # Open the input file for reading and output file for writing
 with open(input_file_path, 'r', encoding='utf-8', errors='replace') as infile, open(output_file_path, 'w', encoding='utf-8') as outfile:
@@ -30,11 +30,11 @@ train_lines = lines[:split_index]
 test_lines = lines[split_index:]
 
 # Write the train set to label_train.txt
-with open(r'D:\Workspace\python_code\ImageGeneration\images_out\label_train.txt', 'w', encoding='utf-8') as train_outfile:
+with open(r'D:\Workspace\python_code\ImageGenerations\images_out\label_train.txt', 'w', encoding='utf-8') as train_outfile:
     train_outfile.writelines(train_lines)
 
 # Write the test set to label_test.txt
-with open(r'D:\Workspace\python_code\ImageGeneration\images_out\label_test.txt', 'w', encoding='utf-8') as test_outfile:
+with open(r'D:\Workspace\python_code\ImageGenerations\images_out\label_test.txt', 'w', encoding='utf-8') as test_outfile:
     test_outfile.writelines(test_lines)
 
 print("Tab characters added successfully.")

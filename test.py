@@ -12,8 +12,8 @@ def check_format(line):
 
 with open(input_file, "r", encoding="utf-8") as infile, open(output_file, "w", encoding="utf-8") as outfile:
     for line in infile.readlines():
-        image_name = line.split(" ", 1)[0]
-        text = line.split(" ", 1)[1]
+        image_name = line.split("\t", 1)[0]
+        text = line.split("\t", 1)[1]
         outfile.write(f"{image_name}\t{text}")
 
 print("Tab characters added successfully.")
